@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import logging
 import pandas as pd
 from sqlalchemy import inspect
 import google.generativeai as genai
@@ -21,9 +22,17 @@ def get_gemini_model():
         GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
         if not GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY environment variable is not set.")
-        print("DEBUG: Configuring Gemini model for the first time.")
+        
         genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        
+        # --- THIS IS THE DYNAMIC PART ---
+        # Read the model name from the environment variable you set on Render.
+        # Fallback to 'gemini-pro' if the variable is not set.
+        model_name = os.getenv("GEMINI_MODEL", "gemini-pro")
+        print(f"DEBUG: Using Gemini model: {model_name}") # This will show in your Render logs
+        gemini_model = genai.GenerativeModel(model_name)
+        # --- END OF DYNAMIC PART ---
+
     return gemini_model
 
 def process_and_store_excel(file) -> (str, dict):
@@ -39,7 +48,7 @@ def process_and_store_excel(file) -> (str, dict):
 
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(df[col])
-            df[col] = pd.to_datetime(df[col], errors='coerce').fillna(df[col])
+            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=False, yearfirst=False).fillna(df[col])
 
         table_name = f"data_{upload_id}_{sanitize_name(sheet_name)}"
         df.to_sql(table_name, engine, index=False, if_exists='replace')
@@ -87,7 +96,8 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
         raise ValueError("Generated query contains disallowed keywords.")
 
     with engine.connect() as connection:
-        result = connection.execute(sql_query)
+        from sqlalchemy import text
+        result = connection.execute(text(sql_query))
         column_names = list(result.keys())
         query_result_data = [dict(zip(column_names, row)) for row in result.fetchall()]
 
@@ -108,8 +118,9 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
 
     json_generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
     summary_response = model.generate_content(summary_prompt, generation_config=json_generation_config)
-
-    summary_data = json.loads(summary_response.text)
+    
+    cleaned_json_text = summary_response.text.strip().replace('```json', '').replace('```', '')
+    summary_data = json.loads(cleaned_json_text)
 
     return QueryResponse(
         natural_language_answer=summary_data.get("natural_language_answer", "Could not generate a summary."),
