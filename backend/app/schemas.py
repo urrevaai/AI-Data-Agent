@@ -5,7 +5,7 @@ class UploadResponse(BaseModel):
     upload_id: str
     message: str
     file_name: str
-    table_schema: Dict[str, List[Dict[str, str]]]
+    schema: Dict[str, List[Dict[str, str]]]
 
 class QueryRequest(BaseModel):
     upload_id: str
