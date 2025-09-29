@@ -1,8 +1,6 @@
+import os
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import os
 
 from . import services, schemas
 
@@ -12,7 +10,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# --- This is the new, flexible way to handle CORS ---
+# It reads the allowed URLs from an environment variable.
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -21,14 +22,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve a minimal UI at /ui (resolve path relative to this file)
-_HERE = os.path.dirname(__file__)
-_FRONTEND_DIR = os.path.join(_HERE, "frontend")
-app.mount("/ui", StaticFiles(directory=_FRONTEND_DIR, html=True), name="ui")
+# --- The app.mount line has been REMOVED ---
+# This is no longer needed because Vercel is serving your frontend.
 
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the AI Data Agent API (Gemini Edition)!"}
+
 
 @app.post("/upload", response_model=schemas.UploadResponse)
 async def upload_excel_file(file: UploadFile = File(...)):
@@ -36,12 +36,13 @@ async def upload_excel_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid file type. Please upload an Excel file.")
     
     try:
-        upload_id, schema = services.process_and_store_excel(file.file, file.filename)
+        # Note: I've updated this to match the latest schema version
+        upload_id, schema = services.process_and_store_excel(file.file)
         return schemas.UploadResponse(
             upload_id=upload_id,
             message="File processed successfully.",
             file_name=file.filename,
-            table_schema=schema
+            schema=schema
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
