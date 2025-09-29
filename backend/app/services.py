@@ -127,4 +127,3 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
         query_result_data=query_result_data,
         visualization_suggestion=VisualizationSuggestion(**summary_data)
     )
-
