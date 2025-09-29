@@ -32,7 +32,6 @@ def get_gemini_model():
 def process_and_store_excel(file) -> (str, dict):
     """Reads an Excel file, cleans it, and stores each sheet in the database."""
     engine = get_engine()
-    # --- FIX: Proactively clean the upload_id to remove hyphens ---
     upload_id = str(uuid.uuid4()).replace('-', '_')
     xls = pd.ExcelFile(file)
     db_schema = {}
@@ -42,11 +41,34 @@ def process_and_store_excel(file) -> (str, dict):
         df.columns = [sanitize_name(col) for col in df.columns]
 
         for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(df[col])
-            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=False, yearfirst=False).fillna(df[col])
+            # --- THIS IS THE FINAL, ROBUST DATA CLEANING FIX ---
+            # Step 1: Attempt to convert the column to numeric.
+            # 'coerce' will turn any non-numeric value (like "error") into NaN.
+            numeric_col = pd.to_numeric(df[col], errors='coerce')
+            
+            # Step 2: Check if the column is primarily numeric.
+            # We check if more than half the non-null values are numbers.
+            if numeric_col.notna().sum() / df[col].notna().sum() > 0.5:
+                 df[col] = numeric_col
+            else:
+                # Step 3: If not numeric, THEN try to convert to datetime.
+                try:
+                    # 'coerce' will turn any non-date value into NaT (Not a Time).
+                    datetime_col = pd.to_datetime(df[col], errors='coerce')
+                    # Only apply the conversion if it results in at least one valid date.
+                    if datetime_col.notna().sum() > 0:
+                        df[col] = datetime_col
+                except Exception:
+                    # If it's neither numeric nor a date, leave it as a string (object).
+                    pass
+            # --- END OF FIX ---
 
         table_name = f"data_{upload_id}_{sanitize_name(sheet_name)}"
-        df.to_sql(table_name, engine, index=False, if_exists='replace')
+        
+        # Step 4: Final conversion to handle database types.
+        # Replace all Pandas null types (NaN, NaT) with None, which becomes SQL NULL.
+        df_for_sql = df.astype(object).where(pd.notnull(df), None)
+        df_for_sql.to_sql(table_name, engine, index=False, if_exists='replace')
 
         inspector = inspect(engine)
         columns = inspector.get_columns(table_name)
@@ -62,7 +84,7 @@ def get_db_schema_string(upload_id: str) -> str:
     table_names = [name for name in inspector.get_table_names() if name.startswith(f"data_{upload_id}")]
 
     for table_name in table_names:
-        schema_str += f'Table "{table_name}":\n' # Add quotes for clarity
+        schema_str += f'Table "{table_name}":\n'
         columns = inspector.get_columns(table_name)
         for column in columns:
             schema_str += f'  - "{column["name"]}" ({str(column["type"])})\n'
@@ -74,7 +96,6 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
     model = get_gemini_model()
     schema_string = get_db_schema_string(upload_id)
 
-    # --- THIS IS THE FINAL FIX FOR THE PROMPT ---
     sql_prompt = f"""
     You are an expert PostgreSQL data analyst. Your database is PostgreSQL.
     Based on the database schema below, write a single, valid PostgreSQL query that answers the user's question.
@@ -90,7 +111,6 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
 
     ### SQL Query:
     """
-    # --- END OF PROMPT FIX ---
 
     sql_response = model.generate_content(sql_prompt)
     sql_query = sql_response.text.strip()
