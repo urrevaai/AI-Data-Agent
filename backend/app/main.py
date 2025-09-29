@@ -1,10 +1,19 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="DEBUGGING SERVER")
+from . import services, schemas
 
+app = FastAPI(
+    title="AI Data Agent API (Gemini Edition)",
+    description="API for chatting with your Excel data using Google Gemini.",
+    version="1.0.0"
+)
+
+# --- This is the new, flexible way to handle CORS ---
+# It reads the allowed URLs from an environment variable.
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -13,33 +22,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- The app.mount line has been REMOVED ---
+# This is no longer needed because Vercel is serving your frontend.
+
 @app.get("/")
 def read_root():
-    return {"message": "Bare-bones server is running!"}
+    return {"message": "Welcome to the AI Data Agent API (Gemini Edition)!"}
 
-# This is a FAKE upload endpoint. It does NOT process the file.
-# It only proves that the server can receive a request without crashing.
-@app.post("/upload")
-async def fake_upload(file: UploadFile = File(...)):
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file received.")
+
+@app.post("/upload", response_model=schemas.UploadResponse)
+async def upload_excel_file(file: UploadFile = File(...)):
+    # Accept .xls, .xlsx, and .csv
+    fname = (file.filename or "").lower()
+    if not fname.endswith((".xls", ".xlsx", ".csv")):
+        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an .xls, .xlsx, or .csv file.")
     
-    print(f"DEBUG: Received file named '{file.filename}'. Not processing it.")
-    
-    # Return a fake, hardcoded response
-    return {
-        "upload_id": "fake-id-12345",
-        "message": "File received but not processed (DEBUG MODE).",
-        "file_name": file.filename,
-        "schema": {"debug_sheet": [{"name": "col1", "type": "TEXT"}]}
-    }
+    try:
+        # Note: I've updated this to match the latest schema version
+        upload_id, schema = services.process_and_store_excel(file.file)
+        return schemas.UploadResponse(
+            upload_id=upload_id,
+            message="File processed successfully.",
+            file_name=file.filename,
+            schema=schema
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
-@app.post("/query")
-async def fake_query(request: dict):
-     # Return a fake, hardcoded response
-    return {
-        "natural_language_answer": "This is a fake response from the debug server.",
-        "query_result_data": [{"result": "ok"}],
-        "visualization_suggestion": {"chart_type": "table"}
-    }
 
+@app.post("/query", response_model=schemas.QueryResponse)
+async def query_data(request: schemas.QueryRequest):
+    try:
+        response = services.query_data_with_llm(
+            question=request.question,
+            upload_id=request.upload_id
+        )
+        return response
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during query processing: {str(e)}")
