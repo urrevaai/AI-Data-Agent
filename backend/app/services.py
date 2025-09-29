@@ -25,13 +25,13 @@ def get_gemini_model():
         
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # --- THIS IS THE DYNAMIC PART ---
-        # Read the model name from the environment variable you set on Render.
-        # Fallback to 'gemini-pro' if the variable is not set.
-        model_name = os.getenv("GEMINI_MODEL", "gemini-pro")
-        print(f"DEBUG: Using Gemini model: {model_name}") # This will show in your Render logs
+        # --- THIS IS THE FINAL FIX ---
+        # We are hardcoding the most stable, universally available model name.
+        # This bypasses any API key permission issues with newer models.
+        model_name = "gemini-pro"
+        print(f"DEBUG: Using stable Gemini model: {model_name}")
         gemini_model = genai.GenerativeModel(model_name)
-        # --- END OF DYNAMIC PART ---
+        # --- END OF FIX ---
 
     return gemini_model
 
@@ -127,3 +127,4 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
         query_result_data=query_result_data,
         visualization_suggestion=VisualizationSuggestion(**summary_data)
     )
+
