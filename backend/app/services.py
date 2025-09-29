@@ -41,29 +41,23 @@ def process_and_store_excel(file) -> (str, dict):
         df.columns = [sanitize_name(col) for col in df.columns]
 
         for col in df.columns:
-            # --- THIS IS THE ULTIMATE DATA CLEANING FIX ---
-            # Step 1: Attempt to convert the column to numeric. 'coerce' will turn non-numeric values into NaN.
+            # Attempt to convert to numeric, coercing errors to NaN
             numeric_col = pd.to_numeric(df[col], errors='coerce')
             
-            # Step 2: Check if the column is primarily numeric to avoid misinterpreting IDs as dates.
-            # We check if more than 80% of the non-null values are numbers.
+            # Check if the column is primarily numeric
             non_null_count = df[col].notna().sum()
             if non_null_count > 0 and (numeric_col.notna().sum() / non_null_count) > 0.8:
                  df[col] = numeric_col
             else:
-                # Step 3: If not primarily numeric, THEN attempt to convert to datetime.
-                # This is a safer check for columns with mixed types or date-like strings.
+                # If not primarily numeric, try to convert to datetime
                 if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
                     datetime_col = pd.to_datetime(df[col], errors='coerce')
-                    # Only apply the conversion if it results in at least one valid date.
                     if datetime_col.notna().sum() > 0:
                         df[col] = datetime_col
-            # --- END OF FIX ---
 
         table_name = f"data_{upload_id}_{sanitize_name(sheet_name)}"
         
-        # Step 4: Final conversion to handle database types.
-        # Replace all Pandas null types (NaN, NaT) with None, which becomes SQL NULL.
+        # Replace all Pandas null types (NaN, NaT) with None for SQL NULL
         df_for_sql = df.astype(object).where(pd.notnull(df), None)
         df_for_sql.to_sql(table_name, engine, index=False, if_exists='replace')
 
