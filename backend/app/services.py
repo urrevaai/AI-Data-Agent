@@ -41,26 +41,23 @@ def process_and_store_excel(file) -> (str, dict):
         df.columns = [sanitize_name(col) for col in df.columns]
 
         for col in df.columns:
-            # --- THIS IS THE FINAL, ROBUST DATA CLEANING FIX ---
-            # Step 1: Attempt to convert the column to numeric.
-            # 'coerce' will turn any non-numeric value (like "error") into NaN.
+            # --- THIS IS THE ULTIMATE DATA CLEANING FIX ---
+            # Step 1: Attempt to convert the column to numeric. 'coerce' will turn non-numeric values into NaN.
             numeric_col = pd.to_numeric(df[col], errors='coerce')
             
-            # Step 2: Check if the column is primarily numeric.
-            # We check if more than half the non-null values are numbers.
-            if numeric_col.notna().sum() / df[col].notna().sum() > 0.5:
+            # Step 2: Check if the column is primarily numeric to avoid misinterpreting IDs as dates.
+            # We check if more than 80% of the non-null values are numbers.
+            non_null_count = df[col].notna().sum()
+            if non_null_count > 0 and (numeric_col.notna().sum() / non_null_count) > 0.8:
                  df[col] = numeric_col
             else:
-                # Step 3: If not numeric, THEN try to convert to datetime.
-                try:
-                    # 'coerce' will turn any non-date value into NaT (Not a Time).
+                # Step 3: If not primarily numeric, THEN attempt to convert to datetime.
+                # This is a safer check for columns with mixed types or date-like strings.
+                if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
                     datetime_col = pd.to_datetime(df[col], errors='coerce')
                     # Only apply the conversion if it results in at least one valid date.
                     if datetime_col.notna().sum() > 0:
                         df[col] = datetime_col
-                except Exception:
-                    # If it's neither numeric nor a date, leave it as a string (object).
-                    pass
             # --- END OF FIX ---
 
         table_name = f"data_{upload_id}_{sanitize_name(sheet_name)}"
@@ -99,8 +96,8 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
     sql_prompt = f"""
     You are an expert PostgreSQL data analyst. Your database is PostgreSQL.
     Based on the database schema below, write a single, valid PostgreSQL query that answers the user's question.
-    You MUST enclose all table and column names in double quotes (e.g., "my_table" or "my_column"). This is very important.
-    Use TO_CHAR() for date formatting, not STRFTIME(). For example, to group by month, use TO_CHAR("sale_date", 'YYYY-MM').
+    You MUST enclose all table and column names in double quotes (e.g., "my_table").
+    To format dates, use TO_CHAR("date_column_name"::timestamp, 'YYYY-MM'). This is the most robust way.
     Only output the SQL query and nothing else. Do not use markdown.
 
     ### Database Schema:
@@ -125,10 +122,10 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
 
     summary_prompt = f"""
     You are a helpful data visualization assistant. Based on the user's original question and the data returned from the database, please do the following:
-    1. Write a concise, natural language answer to the user's question.
-    2. Suggest the best chart type.
-    3. Identify columns for the x-axis and y-axis.
-    4. Provide a descriptive title for the chart.
+    1. A concise, natural language answer.
+    2. The best chart type.
+    3. Columns for x-axis and y-axis.
+    4. A descriptive title.
     Respond ONLY with a valid JSON object with the keys: "natural_language_answer", "chart_type", "x_axis", "y_axis", "title".
     The y_axis must be a list of strings. For a table, set chart_type to 'table' and other keys to null.
 
