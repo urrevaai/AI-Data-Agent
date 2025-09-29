@@ -2,14 +2,21 @@ import os
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="DEBUGGING SERVER")
+# --- THIS IS THE CRUCIAL DEBUGGING CODE ---
+# We will print the variable the moment the server starts.
+raw_origins = os.getenv("ALLOWED_ORIGINS", "NOT_SET")
+print("--- DEBUGGING CORS ---")
+print(f"RAW 'ALLOWED_ORIGINS' variable from Render: '{raw_origins}'")
+parsed_origins = raw_origins.split(",")
+print(f"PARSED list of origins: {parsed_origins}")
+print("--- END DEBUGGING ---")
+# --- ---
 
-# We get the Vercel URL from an environment variable
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+app = FastAPI(title="ULTIMATE DEBUGGING SERVER")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=parsed_origins, # Use the parsed list
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -17,15 +24,10 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "The bare-bones debug server is running!"}
+    return {"message": "The ultimate debug server is running!"}
 
-# This is a FAKE upload endpoint. It only proves the connection works.
 @app.post("/upload")
 async def fake_upload(file: UploadFile = File(...)):
-    print(f"DEBUG: Received file '{file.filename}'. Sending fake success response.")
-    return {
-        "upload_id": "fake-id-12345",
-        "message": "File received by debug server!",
-        "file_name": file.filename,
-        "schema": {"debug_sheet": [{"name": "col1", "type": "TEXT"}]}
-    }
+    print(f"DEBUG: Received file '{file.filename}'.")
+    return {"message": "Fake success from the ultimate debug server!"}
+
