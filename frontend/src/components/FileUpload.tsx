@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { FiUploadCloud, FiFile } from 'react-icons/fi';
-import axios from 'axios';
+import api from '../lib/api';
 import { useApp } from '../contexts/AppContext';
 
 const FileUpload: React.FC = () => {
@@ -17,7 +17,7 @@ const FileUpload: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await axios.post('http://localhost:8000/upload', formData, {
+      const response = await api.post('/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiSend, FiUser, FiCpu, FiLoader } from 'react-icons/fi';
-import axios from 'axios';
+import api from '../lib/api';
 import { useApp } from '../contexts/AppContext';
 import Visualization from './Visualization';
 
@@ -37,7 +37,7 @@ const Chat: React.FC = () => {
     });
 
     try {
-      const response = await axios.post('http://127.0.0.1:8000/query', {
+      const response = await api.post('/query', {
         question,
         upload_id: uploadId,
       });
