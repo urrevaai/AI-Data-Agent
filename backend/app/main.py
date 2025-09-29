@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import services, schemas
@@ -28,6 +28,15 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the AI Data Agent API (Gemini Edition)!"}
+
+# Health/port-detection helpers
+@app.head("/")
+def head_root():
+    return Response(status_code=200)
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
 
 
 @app.post("/upload", response_model=schemas.UploadResponse)
