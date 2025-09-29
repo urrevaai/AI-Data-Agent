@@ -1,99 +1,97 @@
 import React from 'react';
 import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 
+// The props are now much simpler: just the data and the suggestion object from the backend.
 interface VisualizationProps {
-  type: 'bar' | 'line' | 'pie' | 'table';
   data: any[];
-  suggestion: string;
-  xAxisKey?: string;
-  yAxisKey?: string;
-  pieKey?: string;
-  pieNameKey?: string;
+  suggestion: {
+    chart_type?: string;
+    x_axis?: string;
+    y_axis?: string[] | string;
+    title?: string;
+  };
 }
 
-const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
-
-const Visualization: React.FC<VisualizationProps> = ({ 
-  type, 
-  data, 
-  suggestion, 
-  xAxisKey, 
-  yAxisKey, 
-  pieKey, 
-  pieNameKey 
-}) => {
-  if (!data || data.length === 0) {
+// A custom tooltip for better styling
+const ChartTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
     return (
-      <div className="p-4 bg-dark-card rounded-lg border border-dark-border">
-        <p className="text-primary-muted text-center">No data available for visualization</p>
+      <div className="p-2 bg-gray-800 border border-gray-700 rounded-md shadow-lg">
+        <p className="label text-sm text-blue-400">{`${label}`}</p>
+        {payload.map((pld: any, index: number) => (
+          <p key={index} className="intro text-xs" style={{ color: pld.color }}>
+            {`${pld.name}: ${pld.value}`}
+          </p>
+        ))}
       </div>
     );
   }
+  return null;
+};
 
-  // Infer keys if not provided, using the first data object as a hint
-  const inferKeys = (data: any[]) => {
-    if (data.length > 0) {
-      const keys = Object.keys(data[0]);
-      return {
-        inferredXAxisKey: keys[0],
-        inferredYAxisKey: keys[1],
-        inferredPieKey: keys[0], // For pie, value is usually the first key
-        inferredPieNameKey: keys[1], // For pie, name is usually the second key
-      };
-    }
-    return {
-      inferredXAxisKey: 'name',
-      inferredYAxisKey: 'value',
-      inferredPieKey: 'value',
-      inferredPieNameKey: 'name',
-    };
+const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
+
+const Visualization: React.FC<VisualizationProps> = ({ data, suggestion }) => {
+  const { chart_type = 'table', x_axis, y_axis, title } = suggestion || {};
+
+  if (!data || data.length === 0) {
+    return <p className="text-gray-500 text-center p-4">No data to visualize.</p>;
+  }
+
+  // Determine candidate keys
+  const allKeys = Object.keys(data[0] || {});
+  const firstStringKey = allKeys.find(k => typeof (data[0] as any)[k] === 'string');
+  const inferredXAxis = x_axis || firstStringKey || allKeys[0];
+
+  // Collect numeric-like keys across the dataset
+  const numericLikeKeys = Array.from(new Set(
+    allKeys.filter(k => k !== inferredXAxis && data.some(row => {
+      const v = (row as any)[k];
+      const n = typeof v === 'number' ? v : parseFloat(v);
+      return Number.isFinite(n);
+    }))
+  ));
+
+  // Use suggestion y_axis if present, otherwise inferred numeric-like keys
+  const rawYAxisKeys = Array.isArray(y_axis) ? y_axis : (y_axis ? [y_axis] : numericLikeKeys);
+  // Keep only keys that exist in data
+  const yAxisKeys = rawYAxisKeys.filter(k => allKeys.includes(k));
+
+  // Final chart type guard
+  const getChartType = () => {
+    const typeStr = (chart_type || 'table').toLowerCase();
+    if (typeStr.includes('bar')) return 'bar';
+    if (typeStr.includes('line')) return 'line';
+    if (typeStr.includes('pie')) return 'pie';
+    return 'table';
   };
+  const finalChartType = getChartType();
 
-  const inferred = inferKeys(data);
-
-  const resolvedXAxisKey = xAxisKey || inferred.inferredXAxisKey;
-  const resolvedYAxisKey = yAxisKey || inferred.inferredYAxisKey;
-  const resolvedPieKey = pieKey || inferred.inferredPieKey;
-  const resolvedPieNameKey = pieNameKey || inferred.inferredPieNameKey;
+  // Coerce y values to numbers where possible; use null when not numeric
+  const coercedData = data.map(row => {
+    const next: any = { ...row };
+    yAxisKeys.forEach(k => {
+      const v = (row as any)[k];
+      const n = typeof v === 'number' ? v : parseFloat(v);
+      next[k] = Number.isFinite(n) ? n : null;
+    });
+    return next;
+  });
 
   const renderChart = () => {
-    switch (type) {
+    switch (finalChartType) {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis 
-                dataKey={resolvedXAxisKey} // Use resolved key
-                stroke="#9CA3AF"
-                fontSize={12}
-              />
-              <YAxis 
-                stroke="#9CA3AF"
-                fontSize={12}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1E1E1E', 
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
-                  color: '#E5E7EB'
-                }}
-              />
-              <Bar dataKey={resolvedYAxisKey} fill="#3B82F6" radius={[4, 4, 0, 0]} /> {/* Use resolved key */}
+            <BarChart data={coercedData}>
+              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+              <XAxis dataKey={inferredXAxis} tick={{ fill: '#9CA3AF', fontSize: 12 }} />
+              <YAxis tick={{ fill: '#9CA3AF', fontSize: 12 }} />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend />
+              {yAxisKeys.map((key, i) => <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} />)}
             </BarChart>
           </ResponsiveContainer>
         );
@@ -101,124 +99,72 @@ const Visualization: React.FC<VisualizationProps> = ({
       case 'line':
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis 
-                dataKey={resolvedXAxisKey} // Use resolved key
-                stroke="#9CA3AF"
-                fontSize={12}
-              />
-              <YAxis 
-                stroke="#9CA3AF"
-                fontSize={12}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1E1E1E', 
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
-                  color: '#E5E7EB'
-                }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey={resolvedYAxisKey} // Use resolved key
-                stroke="#3B82F6" 
-                strokeWidth={3}
-                dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
-              />
+            <LineChart data={coercedData}>
+              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+              <XAxis dataKey={inferredXAxis} tick={{ fill: '#9CA3AF', fontSize: 12 }} />
+              <YAxis tick={{ fill: '#9CA3AF', fontSize: 12 }} />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend />
+              {yAxisKeys.map((key, i) => <Line key={key} type="monotone" dataKey={key} stroke={COLORS[i % COLORS.length]} />)}
             </LineChart>
           </ResponsiveContainer>
         );
-
+    
       case 'pie':
-        return (
+        // For pie charts, we need a name and a value. We use the backend's hints.
+        const nameKey = inferredXAxis || 'name';
+        const dataKey = yAxisKeys[0] || 'value';
+         return (
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
-                data={data}
+                data={coercedData}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={(props) => {
-                  const entry = props as any; // Cast to any to access dynamic key
-                  const name = entry[resolvedPieNameKey]; // Use resolved key
-                  const percent = entry.percent;
-                  const pct = typeof percent === 'number' ? Math.round(percent * 100) : 0;
-                  return `${name ?? ''} ${pct}%`;
+                label={(props: any) => {
+                  const { percent, ...entry } = props || {};
+                  const p = typeof percent === 'number' ? percent : 0;
+                  return `${entry[nameKey]} ${(p * 100).toFixed(0)}%`;
                 }}
                 outerRadius={80}
                 fill="#8884d8"
-                dataKey={resolvedPieKey} // Use resolved key
+                dataKey={dataKey}
+                nameKey={nameKey}
               >
-                {data.map((entry, index) => (
+                {coercedData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1E1E1E', 
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
-                  color: '#E5E7EB'
-                }}
-              />
+              <Tooltip content={<ChartTooltip />} />
             </PieChart>
           </ResponsiveContainer>
         );
 
       case 'table':
-        const columns = Object.keys(data[0] || {});
+      default:
+        const headers = Object.keys(data[0]);
         return (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-dark-border">
-                  {columns.map((column) => (
-                    <th
-                      key={column}
-                      className="text-left py-3 px-4 font-semibold text-primary-text bg-dark-hover"
-                    >
-                      {column.charAt(0).toUpperCase() + column.slice(1)}
-                    </th>
-                  ))}
-                </tr>
+          <div className="overflow-x-auto rounded-lg border border-gray-700">
+            <table className="min-w-full divide-y divide-gray-600">
+              <thead className="bg-gray-800">
+                <tr>{headers.map(h => <th key={h} className="py-3 px-4 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">{h.replace(/_/g, ' ')}</th>)}</tr>
               </thead>
-              <tbody>
-                {data.map((row, index) => (
-                  <tr
-                    key={index}
-                    className="border-b border-dark-border hover:bg-dark-hover transition-colors"
-                  >
-                    {columns.map((column) => (
-                      <td key={column} className="py-3 px-4 text-primary-muted">
-                        {row[column]}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+              <tbody className="bg-gray-900 divide-y divide-gray-700">
+                {data.map((row, i) => <tr key={i}>{headers.map(h => <td key={h} className="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">{String((row as any)[h] ?? '-')}</td>)}</tr>)}
               </tbody>
             </table>
           </div>
         );
-
-      default:
-        return <p className="text-primary-muted">Unsupported visualization type</p>;
     }
   };
 
   return (
-    <div className="bg-dark-card rounded-lg border border-dark-border overflow-hidden">
-      {suggestion && (
-        <div className="p-4 border-b border-dark-border">
-          <p className="text-sm text-primary-muted">{suggestion}</p>
-        </div>
-      )}
-      <div className="p-4 min-h-[300px]"> {/* Added min-height for consistent chart area */}
+    <div>
+        <h3 className="text-center font-bold mb-2 text-gray-300">{title || ''}</h3>
         {renderChart()}
-      </div>
     </div>
-  );
+  )
 };
 
 export default Visualization;
