@@ -7,22 +7,26 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Provide a stable default if not configured
-if not DATABASE_URL or not DATABASE_URL.strip():
-    _HERE = os.path.dirname(__file__)
-    _DB_PATH = os.path.join(_HERE, "data.db")
-    # Ensure absolute path for SQLite
-    _DB_PATH = os.path.abspath(_DB_PATH)
-    DATABASE_URL = f"sqlite:///{_DB_PATH}"
+# We will initialize engine as None.
+engine = None
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def get_engine():
+    """Lazily connect to the database."""
+    global engine
+    if engine is None:
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL environment variable is not set.")
+        print("DEBUG: First time connecting to the database.")
+        engine = create_engine(
+            DATABASE_URL,
+            connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+        )
+    return engine
 
 def get_db():
+    """Dependency to get a DB session for each request."""
+    db_engine = get_engine()
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     db = SessionLocal()
     try:
         yield db
