@@ -3,7 +3,7 @@ import uuid
 import json
 import logging
 import pandas as pd
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 import google.generativeai as genai
 
 from .database import get_engine
@@ -24,20 +24,16 @@ def get_gemini_model():
             raise ValueError("GEMINI_API_KEY environment variable is not set.")
         
         genai.configure(api_key=GEMINI_API_KEY)
-        
-        # --- THIS IS THE FINAL FIX ---
-        # Using a model name that is confirmed to be available for your API key.
         model_name = "models/gemini-2.5-flash-preview-05-20"
         print(f"DEBUG: Using confirmed available Gemini model: {model_name}")
         gemini_model = genai.GenerativeModel(model_name)
-        # --- END OF FIX ---
-
     return gemini_model
 
 def process_and_store_excel(file) -> (str, dict):
     """Reads an Excel file, cleans it, and stores each sheet in the database."""
     engine = get_engine()
-    upload_id = str(uuid.uuid4())
+    # --- FIX: Proactively clean the upload_id to remove hyphens ---
+    upload_id = str(uuid.uuid4()).replace('-', '_')
     xls = pd.ExcelFile(file)
     db_schema = {}
 
@@ -66,10 +62,10 @@ def get_db_schema_string(upload_id: str) -> str:
     table_names = [name for name in inspector.get_table_names() if name.startswith(f"data_{upload_id}")]
 
     for table_name in table_names:
-        schema_str += f"Table '{table_name}':\n"
+        schema_str += f'Table "{table_name}":\n' # Add quotes for clarity
         columns = inspector.get_columns(table_name)
         for column in columns:
-            schema_str += f"  - {column['name']} ({str(column['type'])})\n"
+            schema_str += f'  - "{column["name"]}" ({str(column["type"])})\n'
     return schema_str
 
 def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
@@ -78,15 +74,23 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
     model = get_gemini_model()
     schema_string = get_db_schema_string(upload_id)
 
+    # --- THIS IS THE FINAL FIX FOR THE PROMPT ---
     sql_prompt = f"""
-    You are an expert SQLite data analyst. Based on the database schema below, write a single, valid SQL query that answers the user's question.
-    Only output the SQL query and nothing else. Do not use markdown, code blocks, or any other formatting.
+    You are an expert PostgreSQL data analyst. Your database is PostgreSQL.
+    Based on the database schema below, write a single, valid PostgreSQL query that answers the user's question.
+    You MUST enclose all table and column names in double quotes (e.g., "my_table" or "my_column"). This is very important.
+    Use TO_CHAR() for date formatting, not STRFTIME(). For example, to group by month, use TO_CHAR("sale_date", 'YYYY-MM').
+    Only output the SQL query and nothing else. Do not use markdown.
+
     ### Database Schema:
     {schema_string}
+
     ### User Question:
     {question}
+
     ### SQL Query:
     """
+    # --- END OF PROMPT FIX ---
 
     sql_response = model.generate_content(sql_prompt)
     sql_query = sql_response.text.strip()
@@ -95,7 +99,6 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
         raise ValueError("Generated query contains disallowed keywords.")
 
     with engine.connect() as connection:
-        from sqlalchemy import text
         result = connection.execute(text(sql_query))
         column_names = list(result.keys())
         query_result_data = [dict(zip(column_names, row)) for row in result.fetchall()]
@@ -103,15 +106,18 @@ def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
     summary_prompt = f"""
     You are a helpful data visualization assistant. Based on the user's original question and the data returned from the database, please do the following:
     1. Write a concise, natural language answer to the user's question.
-    2. Suggest the best chart type for visualizing this data (e.g., 'bar', 'line', 'pie', 'table').
-    3. Identify the column(s) for the x-axis and y-axis.
+    2. Suggest the best chart type.
+    3. Identify columns for the x-axis and y-axis.
     4. Provide a descriptive title for the chart.
     Respond ONLY with a valid JSON object with the keys: "natural_language_answer", "chart_type", "x_axis", "y_axis", "title".
-    The y_axis must be a list of strings. If the best visualization is a table, set chart_type to 'table' and other visualization keys to null.
+    The y_axis must be a list of strings. For a table, set chart_type to 'table' and other keys to null.
+
     ### Original Question:
     {question}
+
     ### Data Returned from Query (first 5 rows):
     {pd.DataFrame(query_result_data).head().to_string()}
+
     ### JSON Response:
     """
 
