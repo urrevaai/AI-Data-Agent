@@ -15,6 +15,23 @@ load_dotenv()
 
 gemini_model = None
 
+xdef list_compatible_gemini_models() -> list:
+    """Return model names that support generateContent in current API version."""
+    try:
+        models = genai.list_models()
+        compatible = []
+        for m in models:
+            supported = getattr(m, "supported_generation_methods", []) or []
+            if "generateContent" in supported:
+                compatible.append(getattr(m, "name", None))
+        # Filter out any Nones and sort for stable output
+        compatible = sorted([name for name in compatible if name])
+        logging.debug(f"Compatible Gemini models: {compatible}")
+        return compatible
+    except Exception as exc:
+        logging.warning(f"Could not list Gemini models: {exc}")
+        return []
+
 def get_gemini_model():
     """Lazily configures and returns the Gemini model on first use."""
     global gemini_model
@@ -25,12 +42,43 @@ def get_gemini_model():
         
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # --- THIS IS THE FINAL FIX ---
-        # We are hardcoding the most stable, universally available model name.
-        # This bypasses any API key permission issues with newer models.
-        model_name = "gemini-pro"
-        print(f"DEBUG: Using stable Gemini model: {model_name}")
-        gemini_model = genai.GenerativeModel(model_name)
+        # Discover compatible models and allow env override via GEMINI_MODEL
+        compatible_models = list_compatible_gemini_models()
+        env_model = os.getenv("GEMINI_MODEL")
+
+        # Preference order if no env override or invalid value
+        preferred_order = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
+            "models/gemini-1.5-flash-8b",
+            "models/gemini-1.0-pro",
+        ]
+
+        selected_model = None
+        if env_model:
+            if not compatible_models or env_model in compatible_models:
+                selected_model = env_model
+            else:
+                logging.warning(
+                    f"GEMINI_MODEL '{env_model}' not compatible. Falling back to a supported model."
+                )
+
+        if not selected_model:
+            if compatible_models:
+                # choose the first available from our preferred list; else first compatible
+                for preferred in preferred_order:
+                    if preferred in compatible_models:
+                        selected_model = preferred
+                        break
+                if not selected_model:
+                    selected_model = compatible_models[0]
+            else:
+                # Fallback to a commonly available model name when listing failed
+                selected_model = "models/gemini-1.5-flash"
+
+        print(f"DEBUG: Compatible Gemini models: {compatible_models}")
+        print(f"DEBUG: Using Gemini model: {selected_model}")
+        gemini_model = genai.GenerativeModel(selected_model)
         # --- END OF FIX ---
 
     return gemini_model
