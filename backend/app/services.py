@@ -55,7 +55,9 @@ def process_and_store_excel(file) -> (str, dict):
                 # Step 3: If not primarily numeric, THEN attempt to convert to datetime.
                 # This is a safer check for columns with mixed types or date-like strings.
                 if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
-                    datetime_col = pd.to_datetime(df[col], errors='coerce')
+                    datetime_col = pd.to_datetime(
+                        df[col], errors='coerce', infer_datetime_format=True
+                    )
                     # Only apply the conversion if it results in at least one valid date.
                     if datetime_col.notna().sum() > 0:
                         df[col] = datetime_col
@@ -128,10 +130,14 @@ def _normalize_sql_for_postgres(sql: str, table_names: list) -> str:
     normalized = normalized.replace('`', '"')
     # Quote known table identifiers
     normalized = _quote_table_identifiers(normalized, table_names)
-    # STRFTIME -> to_char
+    # STRFTIME patterns -> to_char
     normalized = re.sub(r"STRFTIME\(\s*'%Y-%m'\s*,\s*([^)]+)\)", r"to_char(\1::timestamp, 'YYYY-MM')", normalized, flags=re.IGNORECASE)
-    # Lowercase function name variant
+    normalized = re.sub(r"STRFTIME\(\s*'%Y'\s*,\s*([^)]+)\)", r"to_char(\1::timestamp, 'YYYY')", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"STRFTIME\(\s*'%m'\s*,\s*([^)]+)\)", r"to_char(\1::timestamp, 'MM')", normalized, flags=re.IGNORECASE)
+    # Lowercase variants
     normalized = re.sub(r"strftime\(\s*'%Y-%m'\s*,\s*([^)]+)\)", r"to_char(\1::timestamp, 'YYYY-MM')", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"strftime\(\s*'%Y'\s*,\s*([^)]+)\)", r"to_char(\1::timestamp, 'YYYY')", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"strftime\(\s*'%m'\s*,\s*([^)]+)\)", r"to_char(\1::timestamp, 'MM')", normalized, flags=re.IGNORECASE)
     # TO_TIMESTAMP(col) -> col::timestamp to avoid epoch overflow from scientific notation
     normalized = re.sub(r"TO_TIMESTAMP\(\s*([\"A-Za-z0-9_\.]+)\s*\)", r"\1::timestamp", normalized, flags=re.IGNORECASE)
     # CAST(x AS DECIMAL) -> robust numeric coercion to avoid errors on mixed text
@@ -143,6 +149,10 @@ def _normalize_sql_for_postgres(sql: str, table_names: list) -> str:
     normalized = re.sub(r"CAST\(\s*(.*?)\s+AS\s+DECIMAL\s*\)", _robust_numeric_cast, normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"CAST\(\s*(.*?)\s+AS\s+DOUBLE\s+PRECISION\s*\)", _robust_numeric_cast, normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"CAST\(\s*(.*?)\s+AS\s+FLOAT\s*\)", _robust_numeric_cast, normalized, flags=re.IGNORECASE)
+    # INTEGER casts should also be robust; convert CAST(x AS INTEGER) if present
+    normalized = re.sub(r"CAST\(\s*(.*?)\s+AS\s+INT(EGER)?\s*\)", _robust_numeric_cast, normalized, flags=re.IGNORECASE)
+    # SUM(CAST(x AS INTEGER)) variants
+    normalized = re.sub(r"SUM\(\s*CAST\(\s*(.*?)\s+AS\s+INT(EGER)?\s*\)\s*\)", r"SUM( (NULLIF(regexp_replace(\1::text, '[^0-9\\.\\-]', '', 'g'), ''))::numeric )", normalized, flags=re.IGNORECASE)
     return normalized
 
 def query_data_with_llm(question: str, upload_id: str) -> QueryResponse:
